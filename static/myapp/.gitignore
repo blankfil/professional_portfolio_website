@@ -1,0 +1,9 @@
+node_modules
+__pycache__
+venv/
+db.sqlite3
+staticfiles/
+templates/
+.env
+*.pyc
+    
