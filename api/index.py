@@ -7,20 +7,35 @@ from io import BytesIO
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-# Set Django settings module
+# Set Django settings module BEFORE any Django imports
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'online.settings')
 
-# Import Django WSGI application
-from django.core.wsgi import get_wsgi_application
+# Lazy initialization - don't initialize Django until handler is called
+django_app = None
 
-# Initialize Django app (do this once at module level)
-django_app = get_wsgi_application()
+def get_django_app():
+    """Lazy initialization of Django WSGI app"""
+    global django_app
+    if django_app is None:
+        try:
+            from django.core.wsgi import get_wsgi_application
+            django_app = get_wsgi_application()
+        except Exception as e:
+            # If Django fails to initialize, store the error
+            django_app = e
+    # If initialization failed, raise the error
+    if isinstance(django_app, Exception):
+        raise django_app
+    return django_app
 
 def handler(request):
     """Vercel serverless function handler for Django"""
     from vercel import Response
     
     try:
+        # Initialize Django app lazily
+        app = get_django_app()
+        
         # Get request details safely with defaults
         method = getattr(request, 'method', 'GET')
         path = getattr(request, 'path', '/')
@@ -28,13 +43,20 @@ def handler(request):
         headers = getattr(request, 'headers', {}) or {}
         body = getattr(request, 'body', b'') or b''
         
-        # Handle path - remove leading slash if present for PATH_INFO
+        # Ensure path starts with /
         path_info = path if path.startswith('/') else '/' + path
         
         # Build WSGI environ from Vercel request
         host = headers.get('Host', 'localhost')
         server_name = host.split(':')[0] if ':' in host else host
         server_port = host.split(':')[1] if ':' in host else '80'
+        
+        # Determine scheme
+        scheme = 'https'
+        if 'X-Forwarded-Proto' in headers:
+            scheme = headers['X-Forwarded-Proto']
+        elif 'x-forwarded-proto' in headers:
+            scheme = headers['x-forwarded-proto']
         
         environ = {
             'REQUEST_METHOD': method,
@@ -46,7 +68,7 @@ def handler(request):
             'SERVER_NAME': server_name,
             'SERVER_PORT': server_port,
             'wsgi.version': (1, 0),
-            'wsgi.url_scheme': 'https' if headers.get('X-Forwarded-Proto') == 'https' else 'http',
+            'wsgi.url_scheme': scheme,
             'wsgi.input': BytesIO(body),
             'wsgi.errors': sys.stderr,
             'wsgi.multithread': False,
@@ -69,7 +91,7 @@ def handler(request):
             response_headers[:] = headers
         
         # Call Django WSGI app
-        response_body = django_app(environ, start_response)
+        response_body = app(environ, start_response)
         body_bytes = b''.join(response_body)
         
         # Parse status code
@@ -86,10 +108,18 @@ def handler(request):
             headers=headers_dict
         )
         
+    except ImportError as e:
+        import traceback
+        error_details = f"Import Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}\n\nPython Path: {sys.path}"
+        return Response(
+            error_details.encode(),
+            status=500,
+            headers={'Content-Type': 'text/plain; charset=utf-8'}
+        )
     except Exception as e:
         import traceback
         # Return error response for debugging
-        error_details = f"Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+        error_details = f"Error: {str(e)}\n\nType: {type(e).__name__}\n\nTraceback:\n{traceback.format_exc()}\n\nBASE_DIR: {BASE_DIR}\nPython Path: {sys.path}"
         return Response(
             error_details.encode(),
             status=500,
