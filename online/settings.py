@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-&sga&o3z_=2(_i(_4*&c$quswar!(a!kvrngd0iha4ghld&)^3
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['evans-portfolio-website.onrender.com']
 if not DEBUG:
     ALLOWED_HOSTS = [
         '.vercel.app',
